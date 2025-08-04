@@ -1,0 +1,186 @@
+!=======================================================================
+!  File       : m_init.f90
+!  Author     : Ali Fakhreddine
+!  Created    : 15-07-2025
+!  Description: Provides routines to initialize fields with specified
+!               spatial distributions.
+!=======================================================================
+module m_init
+  ! Use associations
+  use m_precision
+  use m_varspace
+  use m_grid
+  implicit none
+
+contains
+
+  subroutine initialize_field(switch, f, val1, val2, val3, val4)
+    implicit none
+    integer(ii) :: i, j
+    integer(ii), intent(in) :: switch
+    real(dp), intent(inout) :: f(0:nx+1,0:ny+1)
+    real(dp), intent(in), optional :: val1, val2, val3, val4
+
+    ! BCs should be inserted in the order left, right, top, bottom
+    !switch = 1 --> all Dirichlet
+    !switch = 2 --> left/right Dirichlet, top/bottom Neumann
+    !switch = 3 --> left/right Neumann, top/bottom Dirichlet
+    !switch = 4 --> all Neumann
+
+    ! zero CVs
+    f(0:nx+1, 0:ny+1) = 0.0_dp
+
+    if(switch .eq. 1) then
+       if(present(val1) .and. present(val2) .and. present(val3) .and. present(val4)) then
+          ! left/right boundaries
+          f(0,    1:ny) = val1
+          f(nx+1, 1:ny) = val2
+          ! top/bottom boundaries
+          f(0:nx+1,ny+1) = val3
+          f(0:nx+1,   0) = val4
+       else
+          print*, 'Error: not enough BC information for switch = ', switch,' in m_init::initialize_field'
+       endif
+    elseif(switch .eq. 2) then
+       if(present(val1) .and. present(val2)) then
+          ! left/right boundaries
+          f(0,    1:ny) = val1
+          f(nx+1, 1:ny) = val2
+          ! top/bottom boundaries
+          do i = 0, nx+1
+             f(i,ny+1) = f(i,  ny)
+             f(i,   0) = f(i,   1)
+          end do
+       else
+          print*, 'Error: not enough BC information for switch = ', switch,' in m_init::initialize_field'
+       endif
+    elseif(switch .eq. 3) then
+       if(present(val1) .and. present(val2)) then
+          ! left/right boundaries
+          do j = 0, ny+1
+             f(0    ,j) = f(1,j)
+             f(nx+1,j) = f(nx,j)
+          end do
+          ! top/bottom boundaries
+          f(0:nx+1,ny+1) = val1
+          f(0:nx+1,   0) = val2
+       else
+          print*, 'Error: not enough BC information for switch = ', switch,' in m_init::initialize_field'
+       endif
+    elseif(switch .eq. 4) then
+       print*, 'Setting Neumann BC on all edges ...'
+       ! left/right boundaries
+       do i = 0, nx+1
+          f(i,0    ) = f(i,1)
+          f(i,ny+1) = f(i,ny)
+       end do
+       ! top/bottom boundaries
+       do j = 0, ny+1
+          f(0    ,j) = f(1,j)
+          f(nx+1,j) = f(nx,j)
+       end do
+    else
+       print*, 'Invalid BC configuration in m_init::initialize_field'
+    endif
+
+  end subroutine initialize_field
+
+  subroutine initialize_species(s1, s2, val1, val2, width1, width2, switch)
+    implicit none
+    integer(ii) :: i, j
+    integer(ii), intent(in) :: switch
+    real(dp), intent(in) :: width1, width2
+    real(dp), intent(in) :: val1, val2
+    real(dp), intent(inout) :: s1(0:nx+1,0:ny+1), s2(0:nx+1,0:ny+1)
+
+    do j  = 0, ny+1
+       do i = 0, nx+1
+          if(switch .eq. 1) then
+             if (xf(i) .le. width1) then
+                s1(i,j) = val1
+             elseif(xf(i) .ge. Lx-width2) then
+                s2(i,j) = val2
+             else
+                s1(i,j) = 0.0_dp
+                s2(i,j) = 0.0_dp
+             endif
+
+          elseif(switch .eq. 2) then
+
+             if (yf(j) .le. width1) then
+                s1(i,j) = val1
+             elseif(yf(j) .ge. Ly-width2) then
+                s2(i,j) = val2
+             else
+                s1(i,j) = 0.0_dp
+                s2(i,j) = 0.0_dp
+             endif
+
+          else
+             print*, "Invalid switch choice in:: initialize_species()"
+          endif
+       enddo
+    enddo
+
+  end subroutine initialize_species
+
+  subroutine initialize_species_Gaussian(s1,s2,n0)
+    implicit none
+    integer(ii) :: i, j
+    real(dp), intent(inout) :: s1(0:nx+1,0:ny+1), s2(0:nx+1,0:ny+1)
+    real(dp), intent(in) :: n0
+    real(dp), parameter :: delta=0.02_dp, sigma=0.2_dp
+    real(dp) :: term
+
+    term = 0.0_dp
+    do j = 1, ny
+       do i = 1, nx
+          term = (xc(i) - 0.5_dp*Lx)**2
+          term = term + (yc(j) - 0.5_dp*Ly)**2
+          term = term/sigma**2
+          term = 1.0_dp + delta * exp(-term)
+          s1(i,j) = n0 * term
+          s2(i,j) = n0
+       enddo
+    enddo
+
+    ! Apply zero-gradient (Neumann) BCs
+    do j = 1, ny
+       s1(0,j)     = s1(1,j)      
+       s1(nx+1,j)  = s1(nx,j)
+       s2(0,j)     = s2(1,j)
+       s2(nx+1,j)  = s2(nx,j)
+    end do
+
+    do i = 0, nx+1
+       s1(i,0)     = s1(i,1)
+       s1(i,ny+1)  = s1(i,ny)
+       s2(i,0)     = s2(i,1)
+       s2(i,ny+1)  = s2(i,ny)
+    end do
+
+  end subroutine initialize_species_Gaussian
+
+  subroutine initialize_using_test_function(test)
+    implicit none
+    integer(ii) :: i, j
+    real(dp), intent(inout) :: test(0:nx+1,0:ny+1)
+
+    ! Interior
+    do j = 1, ny
+       do i = 1, nx
+          test(i,j) = (xc(i)-0.5_dp*Lx)**2.0_dp + (yc(j)-0.5_dp*Ly)**2.0_dp
+       enddo
+    enddo
+
+    ! Boundaries (Neumann)
+    ! left/right but only the interior rows 1…ny
+    test(  0, 1:ny) = test(  1, 1:ny)
+    test(nx+1, 1:ny) = test(nx, 1:ny)
+
+    ! bottom/top for all columns 0…nx+1
+    test(0:nx+1,   0) = test(0:nx+1,   1)
+    test(0:nx+1,ny+1) = test(0:nx+1,ny)
+  end subroutine initialize_using_test_function
+
+end module m_init

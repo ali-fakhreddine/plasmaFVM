@@ -1,0 +1,404 @@
+!=======================================================================
+!  File       : m_solver.f90
+!  Author     : Ali Fakhreddine
+!  Created    : 16-07-2025
+!  Description: Defines general numerical solver routines for field and
+!               variable operations within the simulation framework.
+!=======================================================================
+module m_solver
+  ! Use associations
+  use m_precision
+  use m_varspace
+  use m_constants
+  implicit none
+
+contains
+
+  subroutine update_primitive_variables(Tconst, p1, n1, p2, n2)
+    implicit none
+    integer(ii) :: i, j
+    real(dp), intent(in) :: Tconst
+    real(dp), intent(in), optional :: n1(0:nx+1,0:ny+1)
+    real(dp), intent(in), optional :: n2(0:nx+1,0:ny+1)
+    real(dp), intent(inout), optional :: p1(0:nx+1,0:ny+1)
+    real(dp), intent(inout), optional :: p2(0:nx+1,0:ny+1)
+
+
+    do j = 0, ny+1
+       do i = 0, nx+1
+          if (present(p1) .and. present(n1)) p1(i,j)  = n1(i,j) * kB * Tconst
+          if (present(p2) .and. present(n2)) p2(i,j)  = n2(i,j) * kB * Tconst
+       enddo
+    enddo
+
+  end subroutine update_primitive_variables
+
+  subroutine advance_momentum(dt)
+    implicit none
+    integer(ii) :: i, j
+    real(dp), intent(in) :: dt
+    real(dp):: force_x, force_y
+
+    force_x = 0.0_dp
+    force_y = 0.0_dp
+    ! Advance x-momentum
+    call advance_conserved_quantity_MUSCL(dt, rhou_e, ue, ve, rhouu_e, rhouv_e)
+    ! Advance y-momentum
+    call advance_conserved_quantity_MUSCL(dt, rhov_e, ue, ve, rhovu_e, rhovv_e)
+
+    ! Add isothermal source: Lorentz force and pressure gradient
+    call compute_gradient(dpedx,dpedy,pe)
+    do j = 1, ny
+       do i = 1, nx
+          force_x = (qe/me) * rho_e(i,j) * Ex(i,j)
+          force_y = (qe/me) * rho_e(i,j) * Ey(i,j)
+
+          ! Update momentum
+          rhou_e(i,j) = rhou_e(i,j) + dt*(force_x - dpedx(i,j))
+          rhov_e(i,j) = rhov_e(i,j) + dt*(force_y - dpedy(i,j))
+       enddo
+    enddo
+
+    ! Update boundaries (Neumann)
+    do i = 0, nx+1
+       rhou_e(i,0    ) = rhou_e(i,1)
+       rhou_e(i,ny+1) = rhou_e(i,ny)
+       rhov_e(i,0    ) = rhov_e(i,1)
+       rhov_e(i,ny+1) = rhov_e(i,ny)
+    end do
+    do j = 0, ny+1
+       rhou_e(0    ,j) = rhou_e(1,j)
+       rhou_e(nx+1,j) = rhou_e(nx,j)
+       rhov_e(0    ,j) = rhov_e(1,j)
+       rhov_e(nx+1,j) = rhov_e(nx,j)
+    end do
+
+    ! Compute velocities from updated momentum
+    ue = rhou_e/(rho_e + 1d-9)
+    ve = rhov_e/(rho_e + 1d-9)
+
+  end subroutine advance_momentum
+
+  subroutine advance_conserved_quantity_upwind(dt, cq, velx, vely, mdotx, mdoty)
+    implicit none
+    real(dp), intent(in) :: dt
+    real(dp), intent(inout) :: cq(0:nx+1,0:ny+1) ! cq = conserved quantity
+    real(dp), intent(inout) :: mdotx(0:nx+1,0:ny+1), mdoty(0:nx+1,0:ny+1)
+    real(dp), intent(in) :: velx(0:nx+1,0:ny+1), vely(0:nx+1,0:ny+1)
+    real(dp), allocatable :: cq_old(:,:), flux_u(:,:), flux_v(:,:)
+    integer(ii) :: i, j
+
+    mdotx = cq * velx
+    mdoty = cq * vely
+
+    allocate(cq_old(0:nx+1,0:ny+1))
+    allocate(flux_u(0:nx,  0:ny+1))
+    allocate(flux_v(0:nx+1,0:ny  ))
+    cq_old = cq
+
+    ! Compute velx-fluxes via upwind
+    do j = 0, ny+1
+       do i = 0, nx
+          if (velx(i,j) .ge. 0.0_dp) then
+             flux_u(i,j) = mdotx(i,j)
+          else
+             flux_u(i,j) = mdotx(i+1,j)
+          end if
+       end do
+    end do
+
+    ! Compute ve-fluxes via upwind
+    do j = 0, ny
+       do i = 0, nx+1
+          if (vely(i,j) .ge. 0.0_dp) then
+             flux_v(i,j) = mdoty(i,j)
+          else
+             flux_v(i,j) = mdoty(i,j+1)
+          end if
+       end do
+    end do
+
+    ! Update density: cell-centered divergence
+    do j = 1, ny
+       do i = 1, nx
+          cq(i,j) = cq_old(i,j) &
+               - (dt/dx)*(flux_u(  i,j) - flux_u(i-1,j)) &
+               - (dt/dy)*(flux_v(i,  j) - flux_v(i,j-1))
+       end do
+    end do
+
+    ! Apply simple boundary conditions: zero-gradient (Neumann)
+    do i = 0, nx+1
+       cq(i,0    ) = cq(i,1)
+       cq(i,ny+1) = cq(i,ny)
+    end do
+    do j = 0, ny+1
+       cq(0    ,j) = cq(1,j)
+       cq(nx+1,j) = cq(nx,j)
+    end do
+
+    ! Clean up temporaries
+    deallocate(cq_old, flux_u, flux_v)
+  end subroutine advance_conserved_quantity_upwind
+
+  subroutine advance_conserved_quantity_MUSCL(dt, cq, velx, vely, mdotx, mdoty)
+    implicit none
+    real(dp), intent(in) :: dt
+    real(dp), intent(inout) :: cq(0:nx+1,0:ny+1) ! cq = conserved quantity
+    real(dp), intent(inout) :: mdotx(0:nx+1,0:ny+1), mdoty(0:nx+1,0:ny+1)
+    real(dp), intent(in) :: velx(0:nx+1,0:ny+1), vely(0:nx+1,0:ny+1)
+    real(dp), allocatable :: cq_old(:,:)
+    real(dp), allocatable :: flux_u(:,:), flux_v(:,:)
+    real(dp), allocatable :: slope_x(:,:), slope_y(:,:)
+    real(dp) :: rL, rR
+    integer(ii) :: i, j
+
+    ! Save old density
+    allocate(cq_old(0:nx+1,0:ny+1)); cq_old = cq
+
+    ! Allocate slope and flux arrays
+    allocate(slope_x(0:nx+1,0:ny+1))
+    allocate(slope_y(0:nx+1,0:ny+1))
+    allocate(flux_u(0:nx,  0:ny+1))
+    allocate(flux_v(0:nx+1,0:ny  ))
+
+    ! Compute limited slopes in x and y using minmod:
+    do j = 0, ny+1
+       do i = 1, nx
+          rL = (cq_old(i,j) - cq_old(i-1,j)) / dx
+          rR = (cq_old(i+1,j) - cq_old(i,j)) / dx
+          slope_x(i,j) = max(0.0_dp, min(rL, rR)) + min(0.0_dp, max(rL, rR))
+       end do
+    end do
+    do j = 1, ny
+       do i = 0, nx+1
+          rL = (cq_old(i,j) - cq_old(i,j-1)) / dy
+          rR = (cq_old(i,j+1) - cq_old(i,j)) / dy
+          slope_y(i,j) = max(0.0_dp, min(rL, rR)) + min(0.0_dp, max(rL, rR))
+       end do
+    end do
+
+    ! Reconstruct interface values and compute fluxes:
+    do j = 0, ny+1
+       do i = 0, nx
+          if (i == 0 .or. i == nx) then
+             rL = cq_old(max(0,i),j)
+             rR = cq_old(min(nx+1,i+1),j)
+          else
+             rL = cq_old(i,j) + 0.5_dp*dx*slope_x(i,j)
+             rR = cq_old(i+1,j) - 0.5_dp*dx*slope_x(i+1,j)
+          end if
+
+          if (velx(i,j) .ge. 0.0_dp) then
+             flux_u(i,j) = ue(i,j) * rL
+          else
+             flux_u(i,j) = ue(i,j) * rR
+          end if
+       end do
+    end do
+
+
+    do j = 0, ny
+       do i = 0, nx+1
+          if (j == 0 .or. j == ny) then
+             rL = cq_old(i, max(0,j))
+             rR = cq_old(i, min(ny+1,j+1))
+          else
+             rL = cq_old(i,j) + 0.5_dp*dy*slope_y(i,j)
+             rR = cq_old(i,j+1) - 0.5_dp*dy*slope_y(i,j+1)
+          end if
+          if (vely(i,j) .ge. 0.0_dp) then
+             flux_v(i,j) = ve(i,j) * rL
+          else
+             flux_v(i,j) = ve(i,j) * rR
+          end if
+       end do
+    end do
+
+    ! Update density using divergence of high-order fluxes
+    do j = 1, ny
+       do i = 1, nx
+          cq(i,j) = cq_old(i,j) &
+               - (dt/dx)*(flux_u(  i,j) - flux_u(i-1,j)) &
+               - (dt/dy)*(flux_v(i,  j) - flux_v(i,j-1))
+       end do
+    end do
+
+    ! Apply zero-gradient boundaries
+    do i = 0, nx+1
+       cq(i,0    ) = cq(i,1)
+       cq(i,ny+1) = cq(i,ny)
+    end do
+    do j = 0, ny+1
+       cq(0    ,j) = cq(1,j)
+       cq(nx+1,j) = cq(nx,j)
+    end do
+
+    ! Clean up temporaries
+    deallocate(cq_old, slope_x, slope_y, flux_u, flux_v)
+  end subroutine advance_conserved_quantity_MUSCL
+
+  subroutine solve_poisson_SOR(f, rhsVal, tol, max_iter, omega)
+    implicit none
+    real(dp), intent(inout) :: f(0:nx+1,0:ny+1)
+    real(dp), intent(in)    :: rhsVal(0:nx+1,0:ny+1)
+    real(dp), intent(in)    :: tol, omega
+    integer(ii), intent(in) :: max_iter
+    integer(ii) :: i, j, iter
+    real(dp) :: dx2, dy2, denom, f_old, frac
+    real(dp) :: diff, max_diff
+
+    dx2   = dx*dx
+    dy2   = dy*dy
+    denom = 2.0*(dx2 + dy2)
+    frac    = omega/denom
+
+    do iter = 1, max_iter
+
+       max_diff = 0.0_dp
+
+!!$       ! Zero-gradient BC on top/bottom
+!!$       do i = 0, nx+1
+!!$          f(i,   0) = f(i,   1)    ! bottom ghost row
+!!$          f(i,ny+1) = f(i,  ny)    ! top ghost row
+!!$       end do
+       
+       ! Single lexicographic sweep
+       do j = 1, ny
+          do i = 1, nx
+             f_old    = f(i,j)
+             f(i,j) = (1.0-omega)*f_old + frac * ( &
+                  (f(i+1,j) + f(i-1,j))*dy2 + &
+                  (f(i,j+1) + f(i,j-1))*dx2 - &
+                  dx2*dy2*rhsVal(i,j) )
+             diff = abs(f(i,j) - f_old)
+             if (diff > max_diff) max_diff = diff
+          end do
+       end do
+
+       if (max_diff < tol) exit
+    end do
+    print *, 'Poisson SOR: iterations =', iter, 'residual =', max_diff
+  end subroutine solve_poisson_SOR
+
+  subroutine solve_poisson_RBSOR(f, rhsVal, tol, max_iter, omega)
+    implicit none
+    real(dp), intent(inout) :: f(0:nx+1,0:ny+1)
+    real(dp), intent(in)    :: rhsVal(0:nx+1,0:ny+1)
+    real(dp), intent(in)    :: tol, omega
+    integer(ii), intent(in) :: max_iter
+    integer(ii) :: i, j, iter
+    real(dp) :: dx2, dy2, denom, f_old, diff, max_diff
+
+    dx2 = dx*dx
+    dy2 = dy*dy
+    denom = 2.0*(dx2 + dy2)
+
+    do iter = 1, max_iter
+       max_diff = 0.0
+
+
+       ! Zero-gradient BC on top/bottom
+       do i = 0, nx+1
+          f(i,   0) = f(i,   1)    ! bottom ghost row
+          f(i,ny+1) = f(i,  ny)    ! top ghost row
+       end do
+
+       ! Red-black SOR
+       do j = 1, ny
+          do i = 1 + mod(j,2), nx, 2
+             f_old = f(i,j)
+             f(i,j) = (1.0-omega)*f_old + (omega/denom)*( &
+                  (f(i+1,j)+f(i-1,j))*dy2 + (f(i,j+1)+f(i,j-1))*dx2 - dx2*dy2*rhsVal(i,j) )
+             diff = abs(f(i,j) - f_old)
+             if (diff > max_diff) max_diff = diff
+          end do
+       end do
+       do j = 1, ny
+          do i = 1 + 1-mod(j,2), nx, 2
+             f_old = f(i,j)
+             f(i,j) = (1.0-omega)*f_old + (omega/denom)*( &
+                  (f(i+1,j)+f(i-1,j))*dy2 + (f(i,j+1)+f(i,j-1))*dx2 - dx2*dy2*rhsVal(i,j) )
+             diff = abs(f(i,j) - f_old)
+             if (diff > max_diff) max_diff = diff
+          end do
+       end do
+       if (max_diff < tol) exit
+       print *, 'Poisson SOR: iterations =', iter, 'residual =', max_diff
+    end do
+
+  end subroutine solve_poisson_RBSOR
+
+  subroutine compute_gradient(fx, fy, f)
+    implicit none
+    integer(ii) :: i, j
+    real(dp), intent(inout) :: fx(0:nx,0:ny+1), fy(0:nx+1,0:ny)
+    real(dp), intent(in) :: f(0:nx+1,0:ny+1)
+
+    do j = 0, ny+1
+       do i = 0, nx
+          fx(i,j) = (f(i+1,j) - f(i,j))/dx
+       end do
+    end do
+
+    do j = 0, ny
+       do i = 0, nx+1
+          fy(i,j) = (f(i,j+1) - f(i,j))/dy
+       end do
+    end do
+
+  end subroutine compute_gradient
+
+  subroutine compute_velocity()
+    implicit none
+    integer(ii) :: i, j
+
+    !===============================
+    ! Interior: compute center velocities from E-field
+    !===============================
+    do j = 1, ny
+       do i = 1, nx
+          ue(i,j) = -mu_e * 0.5_dp * (Ex(i,j) + Ex(i-1,j))
+          ui(i,j) =  mu_i * 0.5_dp * (Ex(i,j) + Ex(i-1,j))
+
+          ve(i,j) = -mu_e * 0.5_dp * (Ey(i,j) + Ey(i,j-1))
+          vi(i,j) =  mu_i * 0.5_dp * (Ey(i,j) + Ey(i,j-1))
+       end do
+    end do
+
+    !===============================
+    ! Boundary Conditions: Free-slip, no penetration
+    !===============================
+
+    ! Left and right (i = 0 and i = nx+1)
+    do j = 0, ny+1
+       ! Normal component (x): zero
+       ue(0,j)    = 0.0_dp
+       ue(nx+1,j) = 0.0_dp
+       ui(0,j)    = 0.0_dp
+       ui(nx+1,j) = 0.0_dp
+
+       ! Tangential component (y): mirror from interior
+       ve(0,j)    = ve(1,j)
+       ve(nx+1,j) = ve(nx,j)
+       vi(0,j)    = vi(1,j)
+       vi(nx+1,j) = vi(nx,j)
+    end do
+
+    ! Bottom and top (j = 0 and j = ny+1)
+    do i = 0, nx+1
+       ! Normal component (y): zero
+       ve(i,0)    = 0.0_dp
+       ve(i,ny+1) = 0.0_dp
+       vi(i,0)    = 0.0_dp
+       vi(i,ny+1) = 0.0_dp
+
+       ! Tangential component (x): mirror from interior
+       ue(i,0)    = ue(i,1)
+       ue(i,ny+1) = ue(i,ny)
+       ui(i,0)    = ui(i,1)
+       ui(i,ny+1) = ui(i,ny)
+    end do
+
+  end subroutine compute_velocity
+end module m_solver

@@ -1,0 +1,23 @@
+!=======================================================================
+!  File       : m_precision.f90
+!  Author     : Ali Fakhreddine
+!  Created    : 14-07-2025
+!  Description: Defines kind parameters for logical, integer, real, and
+!               complex precision types used throughout the codebase.
+!=======================================================================
+module m_precision
+  implicit none
+  public
+
+  ! logical kind
+  integer, parameter :: ll = 4
+  
+  ! integer kind:
+  integer, parameter :: ii = selected_int_kind(9)
+
+  ! real kind:
+  integer, parameter :: dp = selected_real_kind(15,300)
+
+!!$  ! complex kind:
+!!$  integer, parameter :: sp = selected_real_kind(6,30)
+end module m_precision
