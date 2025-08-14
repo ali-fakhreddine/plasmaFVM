@@ -15,7 +15,8 @@ module m_constants
   real(dp), parameter :: mi   = 1.67262192e-27   ! ion mass   [kg]
   real(dp), parameter :: eps0 = 8.854187817e-9  ! permittivity    [F/m]
   real(dp), parameter :: kB   = 1.380649e-23     ! Boltzmann const [J/K]
-  real(dp), parameter :: mu_e  = 0.01_dp          ! Mobility m2/V.s
+  real(dp), parameter :: mu_e  = -0.01_dp          ! Mobility m2/V.s
   real(dp), parameter :: mu_i  = 0.0001_dp        ! Mobility m2/V.s 
   real(dp), parameter :: charge = 1.602176634e-19
+
 end module m_constants

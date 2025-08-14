@@ -19,13 +19,15 @@ module m_varspace
 
   ! Field variables
   real(dp) :: input_ne, input_ni, Ts
+  real(dp) :: diff_e, diff_i
   real(dp), allocatable :: phi(:,:), rhs(:,:)
   real(dp), allocatable :: ue(:,:), ve(:,:), ne(:,:), pe(:,:) 
   real(dp), allocatable :: rho_e(:,:), rhou_e(:,:), rhov_e(:,:)
   real(dp), allocatable :: rhouu_e(:,:), rhouv_e(:,:), rhovu_e(:,:), rhovv_e(:,:) 
   real(dp), allocatable :: ui(:,:), vi(:,:), ni(:,:), pi(:,:)
   real(dp), allocatable :: rho_i(:,:), rhou_i(:,:), rhov_i(:,:)
-  real(dp), allocatable :: Ex(:,:), Ey(:,:), dpedx(:,:), dpedy(:,:) 
+  real(dp), allocatable :: Ex(:,:), Ey(:,:), dpedx(:,:), dpedy(:,:)
+  real(dp), allocatable :: dnedx(:,:), dnedy(:,:), dnidx(:,:), dnidy(:,:) 
 
 contains
 
@@ -48,6 +50,8 @@ contains
     allocate(rhovu_e(0:nx+1,0:ny+1), rhovv_e(0:nx+1,0:ny+1))
     allocate(rhou_i(0:nx+1,0:ny+1), rhov_i(0:nx+1,0:ny+1))
     allocate(Ex(0:nx,0:ny+1), Ey(0:nx+1,0:ny))
+    allocate(dnedx(0:nx,0:ny+1), dnedy(0:nx+1,0:ny))
+    allocate(dnidx(0:nx,0:ny+1), dnidy(0:nx+1,0:ny))
     allocate(dpedx(0:nx,0:ny+1), dpedy(0:nx+1,0:ny))
   end subroutine allocate_variables
 

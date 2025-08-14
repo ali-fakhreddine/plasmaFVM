@@ -22,8 +22,8 @@ contains
     npts = (nx)*(ny)!*(nz)
     write(unit,'(A,I0)') 'POINT_DATA ',npts
     ! Write registered fields below
-    call write_scalar(unit, 'rhoe', rho_e)
-    call write_scalar(unit, 'rhoi', rho_i)
+    call write_scalar(unit, 'ne', ne)
+    call write_scalar(unit, 'ni', ni)
     call write_scalar(unit, 'phi', phi)
     call write_vector_face_field(unit, 'E', Ex, Ey)
     call write_vector_cv_field(unit,'electron_velocity', ue, ve)

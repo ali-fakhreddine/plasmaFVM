@@ -32,6 +32,7 @@ contains
 
     if(switch .eq. 1) then
        if(present(val1) .and. present(val2) .and. present(val3) .and. present(val4)) then
+          print*, 'Setting Dirichlet BC on all boundaries!'
           ! left/right boundaries
           f(0,    1:ny) = val1
           f(nx+1, 1:ny) = val2
@@ -43,6 +44,8 @@ contains
        endif
     elseif(switch .eq. 2) then
        if(present(val1) .and. present(val2)) then
+          print*, 'Setting Dirichlet BC on left and right!'
+          print*, 'Setting Neumann BC on top and bottom!'
           ! left/right boundaries
           f(0,    1:ny) = val1
           f(nx+1, 1:ny) = val2
@@ -56,6 +59,8 @@ contains
        endif
     elseif(switch .eq. 3) then
        if(present(val1) .and. present(val2)) then
+          print*, 'Setting Dirichlet BC on top and bottom!'
+          print*, 'Setting Neumann BC on left and right!'
           ! left/right boundaries
           do j = 0, ny+1
              f(0    ,j) = f(1,j)
@@ -68,7 +73,7 @@ contains
           print*, 'Error: not enough BC information for switch = ', switch,' in m_init::initialize_field'
        endif
     elseif(switch .eq. 4) then
-       print*, 'Setting Neumann BC on all edges ...'
+       print*, 'Setting Neumann BC on all boundaries!'
        ! left/right boundaries
        do i = 0, nx+1
           f(i,0    ) = f(i,1)
@@ -124,12 +129,11 @@ contains
 
   end subroutine initialize_species
 
-  subroutine initialize_species_Gaussian(s1,s2,n0)
+  subroutine initialize_species_Gaussian(s1, s2, n0, sigma, delta_n0)
     implicit none
     integer(ii) :: i, j
     real(dp), intent(inout) :: s1(0:nx+1,0:ny+1), s2(0:nx+1,0:ny+1)
-    real(dp), intent(in) :: n0
-    real(dp), parameter :: delta=0.02_dp, sigma=0.2d-3
+    real(dp), intent(in) :: n0, delta_n0, sigma
     real(dp) :: term
 
     term = 0.0_dp
@@ -138,7 +142,7 @@ contains
           term = (xc(i) - 0.5_dp*Lx)**2
           term = term + (yc(j) - 0.5_dp*Ly)**2
           term = term/sigma**2
-          term = 1.0_dp + delta * exp(-term)
+          term = 1.0_dp + delta_n0 * exp(-term)
           s1(i,j) = n0 * term
           s2(i,j) = n0
        enddo

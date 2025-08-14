@@ -19,7 +19,6 @@ contains
     integer(ii) :: i, j
     real(dp), intent(in) :: s1(0:nx+1,0:ny+1), s2(0:nx+1,0:ny+1)
     real(dp), intent(inout) :: rhsVal(0:nx+1,0:ny+1)
-
     do j = 0, ny+1
        do i = 0, nx+1
           rhsVal(i,j) = -charge*(s2(i,j) - s1(i,j))
@@ -396,18 +395,24 @@ contains
     implicit none
     integer(ii) :: i, j
 
+    call compute_gradient(dnedx,dnedy,ne)
+    call compute_gradient(dnidx,dnidy,ni)
     !===============================
     ! Interior: compute center velocities from E-field
     !===============================
     do j = 1, ny
        do i = 1, nx
-          ue(i,j) = -mu_e * 0.5_dp * (Ex(i,j) + Ex(i-1,j))
+          ue(i,j) = mu_e * 0.5_dp * (Ex(i,j) + Ex(i-1,j))
+          ue(i,j) = ue(i,j) - diff_e/ne(i,j)*dnedx(i,j)
 
-          ve(i,j) = -mu_e * 0.5_dp * (Ey(i,j) + Ey(i,j-1))
+          ve(i,j) = mu_e * 0.5_dp * (Ey(i,j) + Ey(i,j-1))
+          ve(i,j) = ve(i,j) - diff_e/ne(i,j)*dnedy(i,j)
 
-          ui(i,j) =  mu_i * 0.5_dp * (Ex(i,j) + Ex(i-1,j))
+          ui(i,j) = mu_i * 0.5_dp * (Ex(i,j) + Ex(i-1,j))
+          ui(i,j) = ui(i,j) - diff_i/ni(i,j)*dnidx(i,j)
 
-          vi(i,j) =  mu_i * 0.5_dp * (Ey(i,j) + Ey(i,j-1))
+          vi(i,j) = mu_i * 0.5_dp * (Ey(i,j) + Ey(i,j-1))
+          vi(i,j) = vi(i,j) - diff_i/ni(i,j)*dnidy(i,j)
        end do
     end do
 
@@ -422,7 +427,7 @@ contains
     real(dp), intent(inout) :: v(0:nx+1, 0:ny+1)
     integer :: i, j
 
-    !--- Left and right boundaries
+    ! Left and right boundaries
     do j = 1, ny
        u(0,j)     = 0.0_dp
        u(nx+1,j)  = 0.0_dp
@@ -430,7 +435,7 @@ contains
        v(nx+1,j)  = v(nx,j)
     end do
 
-    !--- Bottom and top boundaries
+    ! Bottom and top boundaries
     do i = 1, nx
        v(i,0)     = 0.0_dp                ! normal
        v(i,ny+1)  = 0.0_dp
@@ -438,7 +443,7 @@ contains
        u(i,ny+1)  = u(i,ny)
     end do
 
-    !--- Corner extrapolation (optional but consistent)
+    ! Corner extrapolation
     u(0,0)       = 0.0_dp
     u(0,ny+1)    = 0.0_dp
     u(nx+1,0)    = 0.0_dp
